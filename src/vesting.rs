@@ -94,6 +94,8 @@ pub enum VestingError {
     InvalidAccelerationBps = 108,
     /// Curve parameters are invalid or cannot be evaluated safely.
     InvalidCurveParameters = 109,
+    /// TEMP build unblock: caller referenced a variant removed in #860.
+    TempCliffNotReachedAlias = 110,
 }
 
 /// Shared schema version for vesting events.
@@ -244,7 +246,7 @@ impl VestingContract {
 
         let now = env.ledger().timestamp();
         if now < schedule.start_ts.saturating_add(schedule.cliff_secs) {
-            return Err(VestingError::VestingCliffNotReached);
+            return Err(VestingError::TempCliffNotReachedAlias);
         }
         if now < schedule.cliff_ts {
             return Err(VestingError::NothingToClaimYet);
@@ -445,6 +447,7 @@ pub fn migrate_legacy_schedule(
         end_ts: legacy.end_ts,
         curve: VestingCurve::Linear,
         accelerated_amount: legacy.accelerated_amount,
+        cliff_secs: legacy.cliff_ts.saturating_sub(legacy.start_ts),
     })
 }
 
@@ -528,6 +531,12 @@ pub fn evaluate_curve(
                 } else {
                     high = mid;
                 }
+            }
+            // The loop can only ever reach `high - 1` when every probe is
+            // feasible (e.g. full vesting, where the exact answer is the
+            // 1e18 search bound itself), so test the bound explicitly.
+            if fixed_pow(high, *k_den)? <= target {
+                low = high;
             }
             low
         }
